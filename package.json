@@ -1,0 +1,24 @@
+{
+  "name": "pi-gui",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.14.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "pnpm -r --parallel --filter @pi-gui/server --filter @pi-gui/ui dev",
+    "build": "pnpm -r build",
+    "start": "pnpm --filter @pi-gui/server start",
+    "test": "vitest run",
+    "typecheck": "pnpm -r typecheck",
+    "dev:fake": "pnpm -r --parallel --filter @pi-gui/server --filter @pi-gui/ui run --if-present dev:fake",
+    "dev:desktop": "PI_GUI_PORT=4518 PI_GUI_VITE_PORT=5174 pnpm -r --parallel --filter @pi-gui/ui --filter @pi-gui/desktop dev",
+    "start:desktop": "pnpm --filter @pi-gui/ui build && pnpm --filter @pi-gui/desktop start"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.6",
+    "typescript": "7.0.2",
+    "vitest": "5.1.0"
+  }
+}

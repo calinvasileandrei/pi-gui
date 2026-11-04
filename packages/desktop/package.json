@@ -1,0 +1,28 @@
+{
+  "name": "@pi-gui/desktop",
+  "private": true,
+  "version": "0.1.0",
+  "description": "pi GUI \u2014 macOS app",
+  "type": "module",
+  "main": "dist/main.mjs",
+  "scripts": {
+    "build:main": "node build.mjs",
+    "dev": "node build.mjs && PI_GUI_DEV=1 electron .",
+    "start": "node build.mjs && electron .",
+    "typecheck": "tsc -p .",
+    "package": "node package.mjs"
+  },
+  "dependencies": {
+    "@mariozechner/pi-coding-agent": "0.73.1",
+    "node-pty": "1.1.0"
+  },
+  "devDependencies": {
+    "@pi-gui/server": "workspace:*",
+    "electron": "45.2.2",
+    "esbuild": "0.28.2",
+    "electron-builder": "26.18.0"
+  },
+  "files": [
+    "dist"
+  ]
+}

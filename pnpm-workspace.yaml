@@ -1,0 +1,16 @@
+packages:
+  - packages/*
+
+# Install scripts are denied unless listed true (security review: keep this list minimal).
+allowBuilds:
+  esbuild: true
+  electron: true # downloads the Electron binary (from GitHub releases)
+  node-pty: false
+  koffi: false
+  protobufjs: false
+  "@google/genai": false
+  electron-winstaller: false # Windows-only installer tooling pulled in by electron-builder
+
+minimumReleaseAgeExclude:
+  - electron@45.2.2
+  - lucide-react@1.67.0

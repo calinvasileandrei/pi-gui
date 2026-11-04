@@ -1,0 +1,18 @@
+# Packaging config. The app payload is produced by `pnpm deploy` (flat node_modules) in package.mjs.
+appId: dev.pigui.desktop
+productName: pi
+electronVersion: 45.2.2
+directories:
+  app: ../../out/deploy
+  output: ../../out/release
+# keep files on disk (no asar): pi's cli.js is spawned by path and node-pty's spawn-helper must be executable
+asar: false
+npmRebuild: false # node-pty is N-API: its prebuilt binary works in Electron as-is
+mac:
+  target:
+    - target: dir
+      arch: arm64
+  category: public.app-category.developer-tools
+  identity: null # signed ad-hoc afterwards in package.mjs (no Apple Developer ID yet)
+  extendInfo:
+    NSHumanReadableCopyright: "pi-gui — local GUI for the pi coding agent"

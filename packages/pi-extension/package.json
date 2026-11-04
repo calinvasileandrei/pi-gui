@@ -1,0 +1,15 @@
+{
+  "name": "@pi-gui/pi-extension",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p ."
+  },
+  "devDependencies": {
+    "@mariozechner/pi-coding-agent": "0.73.1",
+    "typebox": "1.4.3"
+  }
+}

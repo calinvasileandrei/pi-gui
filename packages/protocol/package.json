@@ -1,0 +1,8 @@
+{
+  "name": "@pi-gui/protocol",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": { "typecheck": "tsc -p ." },
+  "dependencies": { "zod": "4.6.7" }
+}

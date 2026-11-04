@@ -1,0 +1,29 @@
+{
+  "name": "@pi-gui/server",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "PI_GUI_DEV=1 tsx watch src/main.ts",
+    "start": "tsx src/main.ts",
+    "typecheck": "tsc -p .",
+    "dev:fake": "PI_GUI_DEV=1 PI_GUI_PI_BIN=\"node test/fake-pi.mjs\" tsx watch src/main.ts"
+  },
+  "dependencies": {
+    "@mariozechner/pi-coding-agent": "0.73.1",
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "@pi-gui/protocol": "workspace:*",
+    "chokidar": "6.0.0",
+    "gray-matter": "4.0.3",
+    "node-pty": "1.1.0",
+    "tsx": "4.23.15",
+    "ws": "8.22.1",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/ws": "8.18.2"
+  },
+  "exports": {
+    "./app": "./src/app.ts",
+    "./shell-env": "./src/shell-env.ts"
+  }
+}
