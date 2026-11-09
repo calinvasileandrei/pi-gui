@@ -2,7 +2,7 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, screen, session, shell, type MenuItemConstructorOptions } from "electron";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { startApp, type RunningApp } from "@pi-gui/server/app";
 import { applyShellEnv, resolveShellEnv } from "@pi-gui/server/shell-env";
@@ -104,6 +104,10 @@ function createWindow() {
   // and the app navigates there, captures, and deletes the request.
   const snapDir = process.env.PI_GUI_SNAPSHOT_DIR;
   if (snapDir) {
+    // renderer errors land in the app log, so automated checks can see crashes
+    w.webContents.on("console-message", (e) => {
+      if (e.level === "error" || e.level === "warning") console.log(`[renderer ${e.level}] ${e.message}`);
+    });
     const reqFile = join(snapDir, "request.json");
     let busy = false;
     setInterval(async () => {
@@ -200,6 +204,14 @@ async function boot() {
   // Finder/Dock launches get launchd's minimal PATH; adopt the login shell's env (nvm, Homebrew, .zshrc).
   const env = await resolveShellEnv();
   if (env) applyShellEnv(env);
+
+  // On macOS, running the main app binary as Node gives every pi process its own Dock icon ("exec").
+  // The helper app is the same Electron binary but marked LSUIElement, so it stays out of the Dock.
+  if (process.platform === "darwin" && app.isPackaged && !process.env.PI_GUI_NODE) {
+    const name = basename(process.execPath);
+    const helper = join(dirname(process.execPath), "..", "Frameworks", `${name} Helper.app`, "Contents", "MacOS", `${name} Helper`);
+    if (existsSync(helper)) process.env.PI_GUI_NODE = helper;
+  }
 
   server = await startApp({
     // prod: free port (never clashes). dev: fixed port, because Vite's proxy must know where to forward.

@@ -67,7 +67,9 @@ export function defaultPiCommand(bootDir?: string): string[] {
   // package is ESM-only ("import" condition, no ./package.json export) → resolve the entry, cli.js sits next to it
   const entry = fileURLToPath(import.meta.resolve("@mariozechner/pi-coding-agent"));
   const cli = join(dirname(entry), "cli.js");
-  return bootDir ? [process.execPath, writePiBoot(bootDir), cli] : [process.execPath, cli];
+  // the desktop app points this at its background helper binary, so pi processes don't get a Dock icon
+  const node = process.env.PI_GUI_NODE || process.execPath;
+  return bootDir ? [node, writePiBoot(bootDir), cli] : [node, cli];
 }
 
 const STDERR_TAIL = 8 * 1024;

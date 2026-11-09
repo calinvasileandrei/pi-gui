@@ -1,6 +1,11 @@
 import { randomUUID } from "node:crypto";
-import type { AgentMessage, Channel, RpcEvent, SessionInfo, SessionState, SessionStatus } from "@pi-gui/protocol";
+import { DIALOG_METHODS, type AgentMessage, type Channel, type ExtensionUiRequest, type Harness, type RpcEvent, type SessionInfo, type SessionState, type SessionStatus } from "@pi-gui/protocol";
 import { PiProcess, type PiExitInfo } from "./pi/adapter.ts";
+import { ClaudeProcess, claudeSessionIdOf, findClaudeBinary, isClaudeTranscript, type PermissionMode } from "./claude/adapter.ts";
+import { readClaudeTranscript } from "./claude/transcript.ts";
+
+/** whatever runs a session's agent: pi, or the user's Claude Code */
+export type AgentProc = PiProcess | ClaudeProcess;
 import type { Bus } from "./bus.ts";
 
 export interface SessionSpawnSpec {
@@ -18,9 +23,17 @@ export interface SessionSpawnSpec {
   /** subagent tree: 0 = top-level session */
   depth?: number;
   runId?: string;
+  /** default pi; "claude" = the user's own Claude Code CLI */
+  harness?: Harness;
+  /** Claude Code: model alias/id, effort, permission mode */
+  claude?: { model?: string; effort?: string; permissionMode?: PermissionMode };
 }
 
 export interface SupervisorOptions {
+  /** the `claude` CLI to use (settings override) */
+  claudeBin?: () => string | undefined;
+  /** a Claude Code session got its transcript file (for the history list) */
+  onClaudeSession?: (file: string, cwd: string) => void;
   bus: Bus;
   piCommand?: string[];
   /** env injected into every pi (PI_GUI_URL, PI_GUI_TOKEN, …) */
@@ -35,7 +48,7 @@ export interface SupervisorOptions {
 export class ManagedSession {
   readonly id: string;
   status: SessionStatus = "starting";
-  proc?: PiProcess;
+  proc?: AgentProc;
   state?: SessionState;
   exitInfo?: SessionInfo["exitInfo"];
   private crashes: number[] = [];
@@ -62,12 +75,49 @@ export class ManagedSession {
       sessionFile: this.state?.sessionFile ?? this.spec.sessionFile,
       parentId: this.spec.parentId,
       agent: this.spec.agent,
+      harness: this.harness,
       exitInfo: this.exitInfo,
     };
   }
 
+  get harness(): Harness {
+    return this.spec.harness ?? (isClaudeTranscript(this.spec.sessionFile) ? "claude" : "pi");
+  }
+
+  private async spawnClaude(): Promise<ClaudeProcess> {
+    const bin = findClaudeBinary(this.sup.opts.claudeBin?.());
+    if (!bin) throw new Error("Claude Code isn't installed (no `claude` command found). Install it from claude.com/claude-code and log in once in a terminal.");
+    const file = this.state?.sessionFile ?? this.spec.sessionFile;
+    const resume = isClaudeTranscript(file) ? claudeSessionIdOf(file!) : undefined;
+    const c = this.spec.claude ?? {};
+    const proc = new ClaudeProcess({
+      cwd: this.spec.cwd,
+      bin,
+      resume,
+      // after a restart keep what the user picked in the meantime
+      model: this.state?.model?.id ?? c.model,
+      effort: this.state?.thinkingLevel || c.effort,
+      permissionMode: (this.state?.permissionMode as PermissionMode | undefined) ?? c.permissionMode,
+      history: resume ? await readClaudeTranscript(file!) : undefined,
+      env: this.spec.env,
+    });
+    proc.on("session_file", (f: string) => this.sup.opts.onClaudeSession?.(f, this.spec.cwd));
+    return proc;
+  }
+
   async start(): Promise<void> {
     const o = this.sup.opts;
+    if (this.harness === "claude") {
+      let proc: ClaudeProcess;
+      try {
+        proc = await this.spawnClaude();
+      } catch (e) {
+        this.exitInfo = { code: null, signal: null, stderrTail: (e as Error).message };
+        this.setStatus("crashed");
+        throw e;
+      }
+      return this.run(proc);
+    }
     const sessionFile = this.state?.sessionFile ?? this.spec.sessionFile;
     const args = [
       ...(o.baseArgs?.() ?? []),
@@ -80,6 +130,10 @@ export class ManagedSession {
       args,
       env: { ...(o.baseEnv?.() ?? {}), ...this.spec.env, PI_GUI_SESSION_ID: this.id },
     });
+    return this.run(proc);
+  }
+
+  private async run(proc: AgentProc): Promise<void> {
     this.proc = proc;
     this.exitInfo = undefined;
     this.setStatus("starting");
@@ -92,7 +146,7 @@ export class ManagedSession {
     try {
       await this.refreshState();
       if (this.spec.name && !this.state?.sessionName) {
-        await proc.call({ type: "set_session_name", name: this.spec.name }).catch(() => {});
+        await (proc as PiProcess).call({ type: "set_session_name", name: this.spec.name }).catch(() => {});
         await this.refreshState();
       }
       if (this.proc === proc && proc.running) this.setStatus(this.state?.isStreaming ? "streaming" : "idle");
@@ -102,7 +156,15 @@ export class ManagedSession {
     }
   }
 
+  /** dialogs the agent is waiting on — resent with every snapshot so a window that opens later still sees them */
+  readonly pendingUi = new Map<string, ExtensionUiRequest>();
+
   private onEvent(e: RpcEvent): void {
+    if (e.type === "extension_ui_request" && DIALOG_METHODS.has(e.method)) {
+      this.pendingUi.set(e.id, e);
+      // pi answers a timed-out dialog by itself; don't resend it after that
+      if (e.timeout) setTimeout(() => this.pendingUi.delete(e.id), e.timeout).unref();
+    }
     this.sup.opts.bus.publish(this.channel, { kind: "rpc", record: e });
     switch (e.type) {
       case "agent_start":
@@ -138,9 +200,10 @@ export class ManagedSession {
     return this.state;
   }
 
-  private onExit(proc: PiProcess, info: PiExitInfo): void {
+  private onExit(proc: AgentProc, info: PiExitInfo): void {
     if (this.proc !== proc) return; // superseded by restart
     clearTimeout(this.refreshTimer);
+    this.pendingUi.clear();
     this.exitInfo = { code: info.code, signal: info.signal, stderrTail: info.stderrTail };
     if (info.expected) {
       this.setStatus("stopped");
@@ -174,7 +237,7 @@ export class ManagedSession {
     return this.lastMessages;
   }
 
-  requireProc(): PiProcess {
+  requireProc(): AgentProc {
     if (!this.proc?.running) throw new Error(`session ${this.id} is ${this.status}`);
     return this.proc;
   }

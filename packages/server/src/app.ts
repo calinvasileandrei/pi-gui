@@ -15,7 +15,10 @@ import { terminalOps } from "./ops/terminals.ts";
 import { featureOps } from "./ops/features.ts";
 import { projectOps } from "./ops/project.ts";
 import { mcpOps } from "./ops/mcp.ts";
+import { worktreeOps } from "./ops/worktrees.ts";
+import { join } from "node:path";
 import { defaultPiCommand } from "./pi/adapter.ts";
+import { rememberClaudeSession } from "./stored-sessions.ts";
 import { PtyManager, ptyLoadError } from "./terminals/pty.ts";
 
 export interface AppOptions {
@@ -72,6 +75,11 @@ export async function startApp(o: AppOptions = {}): Promise<RunningApp> {
     baseEnv: () => ({ ...o.piEnv, PI_GUI_URL: baseUrl, PI_GUI_TOKEN: token }),
     baseArgs: () => (bridgePath ? ["-e", bridgePath] : []),
     onRemoved: (id) => changes.dropSession(id),
+    claudeBin: () => settings.claudeBin,
+    onClaudeSession: (file) => {
+      void rememberClaudeSession(file);
+      bus.publish("app", { kind: "stored_changed" });
+    },
   });
   sup.registerKiller(() => ptys.killAll());
   changes = new ChangeTracker(
@@ -93,6 +101,7 @@ export async function startApp(o: AppOptions = {}): Promise<RunningApp> {
   const term = terminalOps(ptys, bus);
   const features = featureOps({ sup, changes, runs, ptys, guiDir: GUI_DIR, bridgePath: bridgePath ?? "" });
   const project = projectOps({ sup, bus, changes, guiDir: GUI_DIR });
+  const wt = worktreeOps({ sup, ptys, bus, prefsFile: join(GUI_DIR, "worktrees.json") });
 
   const ops: Record<string, OpHandler> = {
     "app.hello": () => ({
@@ -113,11 +122,12 @@ export async function startApp(o: AppOptions = {}): Promise<RunningApp> {
       await saveSettings(settings);
       return settings;
     },
-    ...sessionOps(sup, bus),
+    ...sessionOps(sup, bus, { harness: () => settings.defaultHarness }),
     ...term.ops,
     ...features.ops,
     ...project.ops,
     ...mcp.ops,
+    ...wt.ops,
   };
 
   const srv = await startServer({

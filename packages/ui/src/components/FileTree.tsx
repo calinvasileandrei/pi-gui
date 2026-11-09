@@ -1,7 +1,11 @@
+import { useWorktrees, worktreeOf } from "../worktrees.ts";
+import { newWorktreeDialog } from "./WorktreeDialogs.tsx";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronDown, ChevronRight, ChevronsDownUp, Copy, File, FileCode, FileImage, FileJson, FileLock, FilePlus, FileText, Folder, FolderInput,
   FolderOpen, FolderPlus, MessageSquarePlus, Pencil, RefreshCw, Search, Trash2, X,
+  GitBranch,
+  GitBranchPlus,
 } from "lucide-react";
 import { Virtuoso } from "react-virtuoso";
 import type { FsEntry } from "@pi-gui/protocol";
@@ -458,19 +462,28 @@ function ExplorerHead({ actions }: { actions?: React.ReactNode }) {
   const project = useApp((s) => s.project);
   const home = useApp((s) => s.home);
   const sessions = useApp((s) => s.sessions);
+  const byDir = useWorktrees((s) => s.byDir);
   const [menu, setMenu] = useState<{ x: number; y: number }>();
-  const projects = [...new Set([...(project ? [project] : []), ...sessions.filter((s) => !s.parentId).map((s) => s.cwd), ...recentProjects()])].slice(0, 14);
+  const here = worktreeOf(project, byDir);
+  const wts = here && here.repo.worktrees.length > 1 ? here.repo.worktrees : [];
+  const inRepo = new Set(here?.repo.worktrees.map((w) => w.path) ?? []);
+  const projects = [...new Set([...(project ? [project] : []), ...sessions.filter((s) => !s.parentId).map((s) => s.cwd), ...recentProjects()])]
+    .filter((p) => !inRepo.has(p) && !(here && worktreeOf(p, byDir)?.repo.repo === here.repo.repo))
+    .slice(0, 12);
+  const open = (e: React.MouseEvent<HTMLElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    setMenu({ x: r.left, y: r.bottom + 4 });
+  };
   return (
     <div className="explorer-head">
-      <button
-        className="proj-switch"
-        title="Switch project"
-        onClick={(e) => {
-          const r = e.currentTarget.getBoundingClientRect();
-          setMenu({ x: r.left, y: r.bottom + 4 });
-        }}
-      >
-        <span className="ellipsis">{project ? baseName(project) : "No folder"}</span>
+      <button className="proj-switch" title={project ? shortPath(project, home) : "Switch project"} onClick={open}>
+        <span className="ellipsis">{here ? here.repo.name : project ? baseName(project) : "No folder"}</span>
+        {here?.wt.branch && (
+          <span className="proj-branch">
+            <GitBranch size={11} />
+            <span className="ellipsis">{here.wt.branch}</span>
+          </span>
+        )}
         <ChevronDown size={13} />
       </button>
       <span className="grow" />
@@ -481,8 +494,17 @@ function ExplorerHead({ actions }: { actions?: React.ReactNode }) {
           y={menu.y}
           onClose={() => setMenu(undefined)}
           items={[
+            ...wts.map<MenuItem>((w) => ({
+              label: w.branch ?? baseName(w.path),
+              hint: w.main ? "main checkout" : w.missing ? "missing" : w.dirty ? `${w.dirty} changed` : undefined,
+              icon: <GitBranch size={14} />,
+              checked: w.path === here?.wt.path,
+              disabled: w.missing,
+              run: () => switchProject(w.path),
+            })),
+            ...(here ? [{ label: "New worktree…", icon: <GitBranchPlus size={14} />, run: () => newWorktreeDialog(project!) } as MenuItem, { sep: true } as MenuItem] : []),
             ...projects.map<MenuItem>((p) => ({ label: baseName(p), hint: shortPath(p, home).replace(/\/[^/]+$/, ""), icon: <Folder size={14} />, checked: p === project, run: () => switchProject(p) })),
-            { sep: true },
+            ...(projects.length ? [{ sep: true } as MenuItem] : []),
             { label: "Open folder…", icon: <FolderInput size={14} />, hint: "⌘O", run: () => void pickFolder().then((d) => d && switchProject(d)) },
           ]}
         />

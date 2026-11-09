@@ -21,6 +21,7 @@ import { act, confirmDialog, req, useApp } from "../store.ts";
 import { refreshMcp, useMcp, useMcpSync } from "../mcp.ts";
 import { CodeEditor } from "../components/DiffEditor.tsx";
 import { Empty, Field, Modal, Toggle, shortPath } from "../components/ui.tsx";
+import { ImportHint } from "../components/ImportHint.tsx";
 
 type Scope = "global" | "project";
 interface ImportSource {
@@ -56,8 +57,19 @@ export function McpPage() {
   const info = useMcp((s) => s.byRoot[project ?? ""]);
   const [edit, setEdit] = useState<{ server?: McpServerInfo; scope: Scope }>();
   const [importing, setImporting] = useState(false);
+  useEffect(() => {
+    // deep link #import=1 (self-screenshot checks)
+    const on = () => /[#&]import=1/.test(location.hash) && setImporting(true);
+    on();
+    window.addEventListener("hashchange", on);
+    return () => window.removeEventListener("hashchange", on);
+  }, []);
   const [rawScope, setRawScope] = useState<Scope>();
   const [open, setOpen] = useState<Record<string, boolean>>({});
+  const [sources, setSources] = useState<ImportSource[]>([]);
+  useEffect(() => {
+    void req<ImportSource[]>("mcp.importSources", { project }).then(setSources, () => setSources([]));
+  }, [project, info?.servers.length]);
 
   const servers = info?.servers ?? [];
   const groups: [Scope, string, McpServerInfo[]][] = [
@@ -65,6 +77,10 @@ export function McpPage() {
     ["global", "All projects", servers.filter((s) => s.scope === "global")],
   ];
   const t = (s: McpServerInfo) => ({ scope: s.scope, project, name: s.name });
+  // servers other tools have that pi doesn't (by name, any scope)
+  const fresh = new Map<string, Set<string>>();
+  for (const src of sources)
+    for (const n of Object.keys(src.servers)) if (!servers.some((x) => x.name === n)) (fresh.get(n) ?? fresh.set(n, new Set()).get(n)!).add(src.label.replace(/^This project · /, "").replace(/ · .*$/, ""));
 
   async function remove(s: McpServerInfo) {
     if (
@@ -125,6 +141,9 @@ export function McpPage() {
             <AlertTriangle size={16} /> <span>{e}</span>
           </div>
         ))}
+        {info && servers.length > 0 && (
+          <ImportHint kind="MCP server" items={[...fresh.keys()]} from={[...new Set([...fresh.values()].flatMap((x) => [...x]))]} onReview={() => setImporting(true)} />
+        )}
         {!info ? (
           <div className="empty-state">
             <span className="spinner" />
@@ -132,8 +151,11 @@ export function McpPage() {
         ) : servers.length === 0 ? (
           <div className="card">
             <Empty icon={<Plug size={22} />} title="No MCP servers yet">
-              Add one, or import the servers you already set up in Claude
-              Desktop, Cursor, VS Code or Claude Code.
+              <span>
+                {fresh.size > 0
+                  ? `Found ${fresh.size} server${fresh.size === 1 ? "" : "s"} in ${[...new Set([...fresh.values()].flatMap((x) => [...x]))].join(", ")} — import them in one click.`
+                  : "Add one, or import the servers you set up in Claude Code, Cursor, Codex, Gemini CLI, OpenCode, VS Code or Zed."}
+              </span>
               <div
                 className="row"
                 style={{ justifyContent: "center", marginTop: 12, gap: 8 }}
@@ -934,7 +956,16 @@ function ImportModal({
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     void req<ImportSource[]>("mcp.importSources", { project }).then(
-      setSources,
+      (list) => {
+        setSources(list);
+        // everything pi doesn't have yet starts ticked (once per name)
+        const pre: Record<string, boolean> = {};
+        const seen = new Set(existing.map((s) => s.name));
+        for (const src of list)
+          for (const n of Object.keys(src.servers))
+            if (!seen.has(n)) (seen.add(n), (pre[`${src.id}/${n}`] = true));
+        setPicked(pre);
+      },
       (e) => (useApp.getState().toast("error", e.message), setSources([])),
     );
   }, [project]);
@@ -988,12 +1019,10 @@ function ImportModal({
           <span className="spinner" />
         ) : sources.length === 0 ? (
           <div className="faint small">
-            Didn't find any MCP configs (looked for Claude Desktop, Cursor,
-            Windsurf, VS Code, Claude Code
-            {project
-              ? ", and this project's .mcp.json / .cursor / .vscode"
-              : ""}
-            ).
+            Didn't find any MCP configs. Looked for Claude Code, Claude
+            Desktop, Cursor, Codex, Gemini CLI, OpenCode, Windsurf, VS Code,
+            Cline and Zed
+            {project ? ", and the same files in this project" : ""}.
           </div>
         ) : (
           sources.map((src) => (

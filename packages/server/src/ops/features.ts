@@ -8,6 +8,7 @@ import type { RunManager } from "../runs.ts";
 import type { PtyManager } from "../terminals/pty.ts";
 import { addExtension, fetchGitExtension, inspectExtension, listExtensions, setExtensionEnabled } from "../extensions.ts";
 import { deleteAgent, loadAgents, saveAgent, validateAgent } from "../agents.ts";
+import { findAgentImportSources } from "../agent-import.ts";
 import { listStoredSessions, renameStoredSession, trashStoredSession } from "../stored-sessions.ts";
 import { expandHome } from "./sessions.ts";
 
@@ -144,6 +145,36 @@ export function featureOps(d: FeatureDeps): { ops: Record<string, OpHandler>; ht
       if (problems.length) throw new Error(problems.join("; "));
       if (p.agent.scope === "project" && !p.project) throw new Error("project scope needs a project folder");
       return { file: await saveAgent(p.agent, p.project ? dir(p.project) : undefined, p.previousFile) };
+    },
+    "agents.importSources": async (a) => {
+      const { project } = z.object({ project: z.string().optional() }).parse(a);
+      return findAgentImportSources(project ? dir(project) : undefined);
+    },
+    "agents.import": async (a) => {
+      const p = z.object({ source: z.string(), names: z.array(z.string()).min(1), scope: z.enum(["project", "global"]), project: z.string().optional(), overwrite: z.boolean().default(false) }).parse(a);
+      if (p.scope === "project" && !p.project) throw new Error("project scope needs a project folder");
+      const project = p.project ? dir(p.project) : undefined;
+      const src = (await findAgentImportSources(project)).find((s) => s.id === p.source);
+      if (!src) throw new Error("those agent files are gone");
+      const { agents: have } = await loadAgents(project);
+      const added: string[] = [];
+      const skipped: string[] = [];
+      for (const name of p.names) {
+        const ag = src.agents.find((x) => x.name === name);
+        if (!ag) continue;
+        const clash = have.find((x) => x.name.toLowerCase() === name.toLowerCase() && x.scope === p.scope);
+        if (clash && !p.overwrite) {
+          skipped.push(name);
+          continue;
+        }
+        await saveAgent(
+          { name: ag.name, description: ag.description, tools: ag.tools, canSpawn: ag.canSpawn, systemPrompt: ag.systemPrompt, scope: p.scope },
+          project,
+          clash?.file,
+        );
+        added.push(name);
+      }
+      return { added, skipped };
     },
     "agents.delete": async (a) => {
       const { file, project } = z.object({ file: z.string(), project: z.string().optional() }).parse(a);

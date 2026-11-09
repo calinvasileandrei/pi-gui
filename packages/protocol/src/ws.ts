@@ -25,6 +25,8 @@ export type ServerMessage =
 
 export type SessionStatus = "starting" | "idle" | "streaming" | "crashed" | "stopped";
 
+export type Harness = "pi" | "claude";
+
 export interface SessionInfo {
   id: string; // GUI-side session id (stable across pi restarts)
   cwd: string;
@@ -33,6 +35,8 @@ export interface SessionInfo {
   sessionFile?: string;
   parentId?: string; // set for subagents
   agent?: string; // agent definition name, for subagents
+  /** which agent runs it: pi (default) or the user's Claude Code */
+  harness?: Harness;
   exitInfo?: { code: number | null; signal: string | null; stderrTail: string };
 }
 
@@ -73,7 +77,10 @@ export type ChannelEvent =
   | { kind: "extensions_changed" }
   /** a watched folder of a project changed on disk (app channel) */
   | { kind: "fs_changed"; root: string; dir: string }
-  | { kind: "mcp_changed"; root: string };
+  | { kind: "mcp_changed"; root: string }
+  /** the session history list changed (a new Claude Code session got its transcript) */
+  | { kind: "stored_changed" }
+  | { kind: "worktrees_changed"; repo: string };
 
 // ---- file explorer ----
 export interface FsEntry {
@@ -134,6 +141,7 @@ export interface StoredSession {
   created: string; // ISO
   modified: string; // ISO (mtime)
   messageCount: number;
+  harness?: Harness;
   openId?: string; // GUI session id if currently open
 }
 
@@ -145,6 +153,37 @@ export interface ExtensionInfo {
   source: "auto" | "settings" | "package";
   enabled: boolean;
   builtin?: boolean; // gui-bridge
+}
+
+// ---- worktrees ----
+export interface WorktreeInfo {
+  path: string;
+  head: string;
+  branch?: string;
+  detached?: boolean;
+  bare?: boolean;
+  locked?: string | boolean;
+  prunable?: string | boolean;
+  /** the repo's main checkout */
+  main: boolean;
+  /** folder is gone (deleted outside git) */
+  missing?: boolean;
+  dirty?: number;
+  ahead?: number;
+  behind?: number;
+  upstream?: boolean;
+  /** HEAD is already contained in the default branch */
+  merged?: boolean;
+  /** commits not on the default branch */
+  unique?: number;
+}
+export interface WorktreeRepo {
+  repo: string;
+  name: string;
+  /** the worktree the queried folder is in */
+  current: string;
+  defaultBranch?: string;
+  worktrees: WorktreeInfo[];
 }
 
 // ---- MCP ----

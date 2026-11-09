@@ -9,6 +9,10 @@ export function SettingsPage() {
   const [s, setS] = useState<GuiSettings | undefined>(settings);
   const [theme, setTheme] = useState<Theme>(getTheme());
   const [piCmd, setPiCmd] = useState<string>("");
+  const [claudeBin, setClaudeBin] = useState<string>();
+  useEffect(() => {
+    void req<{ harnesses: { id: string; bin?: string }[] }>("harness.list").then((h) => setClaudeBin(h.harnesses.find((x) => x.id === "claude")?.bin ?? ""), () => {});
+  }, [settings?.claudeBin]);
   useEffect(() => setS(settings), [settings]);
   useEffect(() => {
     void req<{ piCommand: string[] }>("app.hello").then((h) => setPiCmd(h.piCommand.join(" ")), () => {});
@@ -51,6 +55,32 @@ export function SettingsPage() {
                 </button>
               ))}
             </div>
+          </div>
+        </div>
+        <div className="card">
+          <div className="card-head">
+            <h3>Agent</h3>
+          </div>
+          <div className="card-body form">
+            <Field label="New sessions run on" hint="Claude Code uses your own `claude` login, so turns count against your Claude plan instead of an API key. Pick a Claude model in any session's model menu to switch.">
+              <div className="seg">
+                <button className={s.defaultHarness === "pi" ? "on" : ""} onClick={() => void save({ defaultHarness: "pi" })}>
+                  pi
+                </button>
+                <button className={s.defaultHarness === "claude" ? "on" : ""} disabled={claudeBin === ""} onClick={() => void save({ defaultHarness: "claude" })}>
+                  Claude Code
+                </button>
+              </div>
+            </Field>
+            <Field label="Claude Code command" hint={claudeBin ? `Using ${claudeBin}` : claudeBin === "" ? "Not found — install Claude Code and log in once in a terminal, or enter its path." : " "}>
+              <input
+                className="input mono"
+                placeholder="claude (found on PATH)"
+                value={s.claudeBin ?? ""}
+                onChange={(e) => setS({ ...s, claudeBin: e.target.value || undefined })}
+                onBlur={() => void save({ claudeBin: s.claudeBin || undefined })}
+              />
+            </Field>
           </div>
         </div>
         <div className="card">

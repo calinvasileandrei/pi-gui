@@ -1,3 +1,4 @@
+import { newWorktreeDialog } from "./components/WorktreeDialogs.tsx";
 import { createRoot } from "react-dom/client";
 import { App } from "./App.tsx";
 import { boot, openViewer, switchProject, useApp, type Page } from "./store.ts";
@@ -33,6 +34,7 @@ function applyDeepLink() {
   if (file && st.project) openViewer({ kind: "file", root: st.project, cwd: st.project, path: decodeURIComponent(file) });
   const diff = h.match(/[#&]diff=([^&]+)/)?.[1];
   if (diff && st.project) openViewer({ kind: "diff", root: st.project, cwd: st.project, path: decodeURIComponent(diff) });
+  if (get("wt") === "new" && useApp.getState().project) newWorktreeDialog(useApp.getState().project!);
   const theme = get("theme");
   if (theme === "light" || theme === "dark" || theme === "system") applyTheme(theme);
   // never leave the token in the address bar

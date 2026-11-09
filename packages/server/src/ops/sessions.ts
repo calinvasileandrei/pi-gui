@@ -4,7 +4,8 @@ import { homedir } from "node:os";
 import { z } from "zod";
 import { THINKING_LEVELS, type ExtensionUiResponse, type ThinkingLevel } from "@pi-gui/protocol";
 import type { OpHandler } from "../http.ts";
-import type { Supervisor } from "../sessions.ts";
+import type { ManagedSession, Supervisor } from "../sessions.ts";
+import { CLAUDE_ALIAS_MODELS, ClaudeProcess, findClaudeBinary, isClaudeTranscript } from "../claude/adapter.ts";
 import type { Bus } from "../bus.ts";
 
 const Id = z.object({ id: z.string() });
@@ -13,18 +14,40 @@ export function expandHome(p: string): string {
   return p === "~" ? homedir() : p.startsWith("~/") ? resolve(homedir(), p.slice(2)) : p;
 }
 
-export function sessionOps(sup: Supervisor, bus: Bus): Record<string, OpHandler> {
+const PermissionModeZ = z.enum(["default", "acceptEdits", "plan", "bypassPermissions", "dontAsk", "auto"]);
+
+export function sessionOps(sup: Supervisor, bus: Bus, defaults: { harness: () => "pi" | "claude" } = { harness: () => "pi" }): Record<string, OpHandler> {
+  const spawnSpec = (cwd: string, harness: "pi" | "claude", model?: string, thinking?: string, extra: { name?: string; sessionFile?: string; permissionMode?: z.infer<typeof PermissionModeZ> } = {}) =>
+    harness === "claude"
+      ? { cwd, harness, name: extra.name, sessionFile: extra.sessionFile, claude: { model, effort: thinking, permissionMode: extra.permissionMode } }
+      : { cwd, harness, name: extra.name, sessionFile: extra.sessionFile, args: [...(model ? ["--model", model] : []), ...(thinking ? ["--thinking", thinking] : [])] };
+  const hasHistory = async (s: ManagedSession) => (await s.messages().catch(() => [])).some((m) => m.role === "user");
+
   return {
+    /** which agents can run sessions on this machine */
+    "harness.list": () => {
+      const claude = findClaudeBinary(sup.opts.claudeBin?.());
+      return {
+        default: defaults.harness(),
+        harnesses: [
+          { id: "pi", name: "pi", available: true },
+          { id: "claude", name: "Claude Code", available: !!claude, bin: claude, models: CLAUDE_ALIAS_MODELS },
+        ],
+      };
+    },
+
     "session.list": () => sup.list(),
 
     "session.create": async (a) => {
-      const { cwd, name, sessionFile, model, thinking } = z
+      const { cwd, name, sessionFile, model, thinking, harness, permissionMode } = z
         .object({
           cwd: z.string(),
           name: z.string().optional(),
           sessionFile: z.string().optional(),
           model: z.string().optional(),
-          thinking: z.enum(THINKING_LEVELS as [ThinkingLevel, ...ThinkingLevel[]]).optional(),
+          thinking: z.string().optional(),
+          harness: z.enum(["pi", "claude"]).optional(),
+          permissionMode: PermissionModeZ.optional(),
         })
         .parse(a);
       const dir = resolve(expandHome(cwd));
@@ -34,9 +57,36 @@ export function sessionOps(sup: Supervisor, bus: Bus): Record<string, OpHandler>
         const open = [...sup.sessions.values()].find((s) => s.info().sessionFile === sessionFile && s.status !== "stopped");
         if (open) return open.info();
       }
-      const args = [...(model ? ["--model", model] : []), ...(thinking ? ["--thinking", thinking] : [])];
-      const s = await sup.create({ cwd: dir, name, sessionFile, args });
+      const h = sessionFile ? (isClaudeTranscript(sessionFile) ? "claude" : "pi") : (harness ?? defaults.harness());
+      if (h === "pi" && thinking && !THINKING_LEVELS.includes(thinking as ThinkingLevel)) throw new Error(`unknown thinking level ${thinking}`);
+      const s = await sup.create(spawnSpec(dir, h, model, thinking, { name, sessionFile, permissionMode }));
       return s.info();
+    },
+
+    /**
+     * Pick a model from the other agent. A conversation can't move between pi and Claude Code,
+     * so an empty session switches in place and one with history opens a new session next to it.
+     */
+    "session.switchHarness": async (a) => {
+      const { id, harness, model } = z.object({ id: z.string(), harness: z.enum(["pi", "claude"]), model: z.string().optional() }).parse(a);
+      const s = sup.get(id);
+      if (s.harness === harness) throw new Error("already on that agent");
+      if (!(await hasHistory(s))) {
+        await sup.remove(id);
+        const n = await sup.create(spawnSpec(s.spec.cwd, harness, model, undefined, { name: s.spec.name }));
+        return { info: n.info(), replaced: true };
+      }
+      const n = await sup.create(spawnSpec(s.spec.cwd, harness, model));
+      return { info: n.info(), replaced: false };
+    },
+
+    "session.setPermissionMode": async (a) => {
+      const { id, mode } = z.object({ id: z.string(), mode: PermissionModeZ }).parse(a);
+      const s = sup.get(id);
+      const p = s.requireProc();
+      if (!(p instanceof ClaudeProcess)) throw new Error("permission modes are for Claude Code sessions");
+      await p.setPermissionMode(mode);
+      await s.refreshState();
     },
 
     "session.snapshot": async (a) => {
@@ -44,7 +94,7 @@ export function sessionOps(sup: Supervisor, bus: Bus): Record<string, OpHandler>
       const s = sup.get(id);
       const seq = bus.head(s.channel); // take head *before* reading messages so nothing is lost
       const [messages, state] = await Promise.all([s.messages().catch(() => []), s.refreshState().catch(() => s.state)]);
-      return { info: s.info(), state, messages, seq };
+      return { info: s.info(), state, messages, seq, uiRequests: [...s.pendingUi.values()] };
     },
 
     "session.prompt": async (a) => {
@@ -84,9 +134,10 @@ export function sessionOps(sup: Supervisor, bus: Bus): Record<string, OpHandler>
     },
 
     "session.setThinking": async (a) => {
-      const { id, level } = z.object({ id: z.string(), level: z.enum(THINKING_LEVELS as [ThinkingLevel, ...ThinkingLevel[]]) }).parse(a);
+      const { id, level } = z.object({ id: z.string(), level: z.string() }).parse(a);
       const s = sup.get(id);
-      await s.requireProc().setThinking(level);
+      if (s.harness === "pi" && !THINKING_LEVELS.includes(level as ThinkingLevel)) throw new Error(`unknown thinking level ${level}`);
+      await s.requireProc().setThinking(level as ThinkingLevel);
       await s.refreshState();
     },
 
@@ -128,7 +179,9 @@ export function sessionOps(sup: Supervisor, bus: Bus): Record<string, OpHandler>
 
     "session.uiRespond": async (a) => {
       const { id, response } = z.object({ id: z.string(), response: z.record(z.string(), z.unknown()) }).parse(a);
-      sup.get(id).requireProc().respondUi({ ...response, type: "extension_ui_response" } as ExtensionUiResponse);
+      const sess = sup.get(id);
+      if (typeof response.id === "string") sess.pendingUi.delete(response.id);
+      sess.requireProc().respondUi({ ...response, type: "extension_ui_response" } as ExtensionUiResponse);
     },
   };
 }

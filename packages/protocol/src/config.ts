@@ -41,6 +41,10 @@ export const GuiSettingsSchema = z.object({
   subagentMaxDepth: z.number().int().min(0).max(3).default(1),
   restartOnCrash: z.boolean().default(false),
   piBin: z.string().optional(), // override pi binary
+  /** agent for new sessions: pi, or the user's own Claude Code (runs on their Claude plan) */
+  defaultHarness: z.enum(["pi", "claude"]).default("pi"),
+  /** override the `claude` CLI location */
+  claudeBin: z.string().optional(),
   projects: z.array(z.string()).default([]),
 });
 export type GuiSettings = z.infer<typeof GuiSettingsSchema>;

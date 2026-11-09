@@ -19,6 +19,7 @@ import { ConfirmHost, Empty, Kbd, MOD, PromptHost, Toasts, baseName, shortPath }
 import { AgentsPage } from "./pages/AgentsPage.tsx";
 import { ExtensionsPage } from "./pages/ExtensionsPage.tsx";
 import { McpPage } from "./pages/McpPage.tsx";
+import { WorktreeDialogHost } from "./components/WorktreeDialogs.tsx";
 import { useMcpSync } from "./mcp.ts";
 import { TerminalsPage } from "./pages/TerminalsPage.tsx";
 import { SettingsPage } from "./pages/SettingsPage.tsx";
@@ -252,6 +253,7 @@ export function App() {
       <Dialogs />
       {palette && <CommandPalette />}
       <ConfirmHost />
+      <WorktreeDialogHost />
       <PromptHost />
       <Toasts />
     </div>

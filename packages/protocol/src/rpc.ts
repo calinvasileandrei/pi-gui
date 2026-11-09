@@ -50,6 +50,8 @@ export interface Model {
   input?: string[];
   contextWindow?: number;
   maxTokens?: number;
+  /** levels the thinking picker offers (Claude Code: effort levels); default THINKING_LEVELS */
+  thinkingLevels?: string[];
   [k: string]: unknown;
 }
 
@@ -66,6 +68,10 @@ export interface SessionState {
   autoCompactionEnabled: boolean;
   messageCount: number;
   pendingMessageCount: number;
+  /** Claude Code sessions: tool permission mode */
+  permissionMode?: string;
+  /** Claude Code sessions: how much of the Claude plan is used ("5h 37% · week 62%") */
+  planUsage?: { text: string; overage: boolean; resetsAt?: number };
 }
 
 export interface SessionStats {

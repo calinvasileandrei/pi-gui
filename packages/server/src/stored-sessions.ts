@@ -1,9 +1,34 @@
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
-import { appendFile, mkdir, readdir, readFile, rename, stat } from "node:fs/promises";
+import { appendFile, mkdir, readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import type { StoredSession } from "@pi-gui/protocol";
 import { PI_AGENT_DIR } from "./terminals/profiles.ts";
+import { GUI_DIR } from "./settings.ts";
+import { isClaudeTranscript } from "./claude/adapter.ts";
+import { readClaudeMeta } from "./claude/transcript.ts";
+
+// Claude Code keeps every session it ever ran in ~/.claude/projects; the history shows only the ones
+// started from this app, remembered here.
+const claudeIndexFile = () => join(GUI_DIR, "claude-sessions.json");
+async function claudeIndex(): Promise<string[]> {
+  try {
+    const v = JSON.parse(await readFile(claudeIndexFile(), "utf8"));
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+let indexWrite = Promise.resolve();
+function editClaudeIndex(f: (files: string[]) => string[]) {
+  indexWrite = indexWrite.then(async () => {
+    const next = [...new Set(f(await claudeIndex()))];
+    await mkdir(GUI_DIR, { recursive: true });
+    await writeFile(claudeIndexFile(), JSON.stringify(next, null, 2));
+  }).catch(() => {});
+  return indexWrite;
+}
+export const rememberClaudeSession = (file: string) => editClaudeIndex((xs) => (xs.includes(file) ? xs : [...xs, file]));
 
 /** pi's session store (docs/session-format.md): ~/.pi/agent/sessions/--<cwd>--/<ts>_<uuid>.jsonl */
 export const sessionsRoot = () => join(PI_AGENT_DIR, "sessions");
@@ -60,19 +85,20 @@ export async function readSessionMeta(file: string): Promise<Omit<StoredSession,
 
 export async function listStoredSessions(filterCwd?: string): Promise<Omit<StoredSession, "openId">[]> {
   const root = sessionsRoot();
-  if (!existsSync(root)) return [];
-  const dirs = await readdir(root, { withFileTypes: true });
+  const dirs = existsSync(root) ? await readdir(root, { withFileTypes: true }) : [];
   const files: string[] = [];
   for (const d of dirs) {
     if (!d.isDirectory()) continue;
     for (const f of await readdir(join(root, d.name)).catch(() => [])) if (f.endsWith(".jsonl")) files.push(join(root, d.name, f));
   }
-  const metas = (await Promise.all(files.map(readSessionMeta))).filter((m): m is NonNullable<typeof m> => !!m);
+  const claude = (await claudeIndex()).filter((f) => existsSync(f));
+  const metas = [...(await Promise.all(files.map(readSessionMeta))), ...(await Promise.all(claude.map(readClaudeMeta)))].filter((m): m is NonNullable<typeof m> => !!m);
   return metas.filter((m) => !filterCwd || m.cwd === filterCwd).sort((a, b) => b.modified.localeCompare(a.modified));
 }
 
 /** Only files inside pi's session store may be renamed/deleted through the GUI. */
 export function assertSessionFile(file: string) {
+  if (isClaudeTranscript(file)) return;
   const root = sessionsRoot();
   if (!file.startsWith(root + "/") || !file.endsWith(".jsonl")) throw new Error("not a pi session file");
 }
@@ -81,6 +107,11 @@ export function assertSessionFile(file: string) {
 export async function renameStoredSession(file: string, name: string) {
   assertSessionFile(file);
   const raw = await readFile(file, "utf8");
+  if (isClaudeTranscript(file)) {
+    // what Claude Code's own /rename writes
+    await appendFile(file, (raw.endsWith("\n") || raw === "" ? "" : "\n") + JSON.stringify({ type: "custom-title", customTitle: name, sessionId: basename(file, ".jsonl") }) + "\n");
+    return;
+  }
   let leaf: string | null = null;
   for (const line of raw.split("\n")) {
     try {
@@ -100,5 +131,6 @@ export async function trashStoredSession(file: string, trashDir: string) {
   assertSessionFile(file);
   await mkdir(trashDir, { recursive: true });
   await rename(file, join(trashDir, `${Date.now()}-${basename(file)}`));
+  if (isClaudeTranscript(file)) await editClaudeIndex((xs) => xs.filter((x) => x !== file));
   cache.delete(file);
 }

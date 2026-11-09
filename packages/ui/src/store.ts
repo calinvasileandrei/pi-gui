@@ -193,6 +193,13 @@ export function recentProjects(): string[] {
 export function rememberProject(dir: string) {
   ls.set("pi-gui-projects", [dir, ...recentProjects().filter((d) => d !== dir)].slice(0, 12));
 }
+/** sidebar order of projects (repo keys), set by dragging; new projects go on top */
+export function projectOrder(): string[] {
+  return ls.get<string[]>("pi-gui-project-order", []);
+}
+export function setProjectOrder(keys: string[]) {
+  ls.set("pi-gui-project-order", [...new Set(keys)]);
+}
 export function forgetProject(dir: string) {
   ls.set("pi-gui-projects", recentProjects().filter((d) => d !== dir));
 }
@@ -301,6 +308,9 @@ export function boot() {
         break;
       case "toast":
         st.toast(e.level, e.message);
+        break;
+      case "stored_changed":
+        void refreshStored();
         break;
       case "approval_done":
         for (const id of Object.keys(st.chats)) st.updateChat(id, (c) => ({ ...c, approvals: c.approvals.filter((a) => a.id !== e.id) }));

@@ -19,6 +19,7 @@ export function Composer({ id, chat }: { id: string; chat: ChatState }) {
   const status = chat.info?.status;
   const busy = status === "streaming";
   const usable = status === "idle" || status === "streaming";
+  const agent = chat.info?.harness === "claude" ? "Claude" : "pi";
   const isBash = text.trimStart().startsWith("!");
 
   useEffect(() => {
@@ -194,7 +195,7 @@ export function Composer({ id, chat }: { id: string; chat: ChatState }) {
           ref={ta}
           value={text}
           rows={1}
-          placeholder={!usable ? `Session is ${status ?? "loading"}…` : busy ? "Steer pi while it works… (⌥⏎ to queue a follow-up)" : "Ask pi to build, fix or explain something…"}
+          placeholder={!usable ? `Session is ${status ?? "loading"}…` : busy ? `Steer ${agent} while it works… (⌥⏎ to queue a follow-up)` : `Ask ${agent} to build, fix or explain something…`}
           disabled={!usable}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {

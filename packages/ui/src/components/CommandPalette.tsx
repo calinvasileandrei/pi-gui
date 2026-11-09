@@ -1,5 +1,7 @@
+import { useWorktrees, worktreeOf } from "../worktrees.ts";
+import { newWorktreeDialog, removeWorktreeDialog } from "./WorktreeDialogs.tsx";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Blocks, Bot, Plug, FolderOpen, FolderTree, GitBranch, PanelLeft, FolderPlus, History, MessageSquare, Network, Play, Plus, RotateCcw, Settings, ShieldCheck, Square, SquareTerminal } from "lucide-react";
+import { Blocks, Bot, Plug, GitBranchPlus, Trash2, FolderOpen, FolderTree, GitBranch, PanelLeft, FolderPlus, History, MessageSquare, Network, Play, Plus, RotateCcw, Settings, ShieldCheck, Square, SquareTerminal } from "lucide-react";
 import { act, loadProfiles, openSession, pickFolder, recentProjects, req, switchProject, useApp } from "../store.ts";
 import { startProfile } from "./TerminalPanel.tsx";
 import { MOD, baseName, shortPath, timeAgo } from "./ui.tsx";
@@ -68,6 +70,13 @@ export function CommandPalette() {
     for (const s of st.sessions.filter((x) => !x.parentId)) out.push({ id: `s-${s.id}`, group: "Open sessions", label: s.name ?? "New session", hint: baseName(s.cwd), icon: <MessageSquare size={15} />, run: () => st.setActive(s.id) });
     const open = new Set(st.sessions.map((s) => s.sessionFile));
     for (const s of st.stored.filter((x) => !open.has(x.file)).slice(0, 60)) out.push({ id: `r-${s.file}`, group: "Resume", label: s.name ?? s.firstMessage ?? "Session", hint: `${baseName(s.cwd)} · ${timeAgo(s.modified)}`, icon: <History size={15} />, run: () => openSession(s.cwd, s.file) });
+    const wt = worktreeOf(st.project, useWorktrees.getState().byDir);
+    if (st.project && wt) {
+      out.push({ id: "wt-new", group: "Worktrees", label: "New worktree…", hint: wt.repo.name, icon: <GitBranchPlus size={15} />, run: () => newWorktreeDialog(st.project!) });
+      for (const w of wt.repo.worktrees)
+        if (w.path !== wt.wt.path && !w.missing) out.push({ id: `wt-${w.path}`, group: "Worktrees", label: `Switch to ${w.branch ?? baseName(w.path)}`, hint: shortPath(w.path, st.home), icon: <GitBranch size={15} />, run: () => switchProject(w.path) });
+      if (!wt.wt.main) out.push({ id: "wt-rm", group: "Worktrees", label: `Remove worktree ${wt.wt.branch ?? baseName(wt.wt.path)}…`, icon: <Trash2 size={15} />, run: () => removeWorktreeDialog(wt.wt.path) });
+    }
     for (const p of recentProjects()) out.push({ id: `sw-${p}`, group: "Projects", label: `Switch to ${baseName(p)}`, hint: shortPath(p, st.home), icon: <FolderOpen size={15} />, run: () => switchProject(p) });
     for (const p of recentProjects()) out.push({ id: `p-${p}`, group: "Projects", label: `New session in ${baseName(p)}`, hint: shortPath(p, st.home), icon: <FolderOpen size={15} />, run: () => openSession(p) });
     out.push({ id: "agents", group: "Go to", label: "Agents", icon: <Bot size={15} />, run: () => st.setPage("agents") });

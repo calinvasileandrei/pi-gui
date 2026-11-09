@@ -13,6 +13,7 @@ mac:
     - target: dir
       arch: arm64
   category: public.app-category.developer-tools
+  icon: build/icon.icns
   identity: null # signed ad-hoc afterwards in package.mjs (no Apple Developer ID yet)
   extendInfo:
     NSHumanReadableCopyright: "pi-gui — local GUI for the pi coding agent"

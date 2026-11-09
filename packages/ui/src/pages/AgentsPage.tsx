@@ -1,8 +1,26 @@
 import { useEffect, useMemo, useState } from "react";
-import { Bot, Plus, Trash2 } from "lucide-react";
+import { Bot, Download, Plus, Trash2 } from "lucide-react";
 import { THINKING_LEVELS, type AgentDefinition, type ConfigError, type ExtensionInfo, type Model } from "@pi-gui/protocol";
 import { act, confirmDialog, req, useApp } from "../store.ts";
-import { Empty, Field, Toggle, baseName } from "../components/ui.tsx";
+import { Empty, Field, Modal, Toggle, baseName, shortPath } from "../components/ui.tsx";
+import { ImportHint } from "../components/ImportHint.tsx";
+
+interface ImportedAgent {
+  name: string;
+  description: string;
+  tools?: string[];
+  canSpawn: boolean;
+  systemPrompt: string;
+  notes: string[];
+  file: string;
+}
+interface AgentSource {
+  id: string;
+  label: string;
+  path: string;
+  agents: ImportedAgent[];
+}
+const appOf = (label: string) => label.replace(/^This project · /, "").replace(/ · .*$/, "");
 import { useMcp } from "../mcp.ts";
 
 const BUILTIN = ["read", "bash", "edit", "write", "grep", "find", "ls"];
@@ -19,14 +37,31 @@ export function AgentsPage() {
   const [models, setModels] = useState<Model[]>([]);
   const [exts, setExts] = useState<ExtensionInfo[]>([]);
   const [problems, setProblems] = useState<string[]>([]);
-  const mcpServers = useMcp((s) => s.byRoot[project ?? ""]?.servers ?? []).filter((s) => s.status !== "disabled");
+  // select the stored array itself: a fresh `[]` per call makes the store look changed on every render
+  const mcpAll = useMcp((s) => s.byRoot[project ?? ""]?.servers);
+  const mcpServers = (mcpAll ?? []).filter((s) => s.status !== "disabled");
   const [saving, setSaving] = useState(false);
+  const [sources, setSources] = useState<AgentSource[]>([]);
+  const [importing, setImporting] = useState(false);
+  useEffect(() => {
+    // deep link #import=1 (self-screenshot checks)
+    const on = () => /[#&]import=1/.test(location.hash) && setImporting(true);
+    on();
+    window.addEventListener("hashchange", on);
+    return () => window.removeEventListener("hashchange", on);
+  }, []);
 
   const load = async () => {
     const r = await act(req<typeof data>("agents.list", { project }));
     if (r) setData(r);
     return r;
   };
+  useEffect(() => {
+    void req<AgentSource[]>("agents.importSources", { project }).then(setSources, () => setSources([]));
+  }, [project, data.agents.length]);
+  const fresh = new Map<string, Set<string>>();
+  for (const src of sources) for (const a of src.agents) if (!data.agents.some((x) => x.name.toLowerCase() === a.name)) (fresh.get(a.name) ?? fresh.set(a.name, new Set()).get(a.name)!).add(appOf(src.label));
+  const freshFrom = [...new Set([...fresh.values()].flatMap((x) => [...x]))];
   useEffect(() => {
     void load();
     void req<ExtensionInfo[]>("ext.list", { project }).then(setExts, () => {});
@@ -79,10 +114,16 @@ export function AgentsPage() {
               Subagent definitions pi can delegate to. Stored as Markdown in <code>.pi/agents/</code> (project) or <code>~/.pi/agent/agents/</code> (global) — the project wins on a name clash. Changes apply on the next spawn.
             </p>
           </div>
-          <button className="btn primary" onClick={() => setDraft(blank(project ? "project" : "global"))}>
-            <Plus size={14} /> New agent
-          </button>
+          <div className="row" style={{ gap: 8, flex: "none" }}>
+            <button className="btn" onClick={() => setImporting(true)} title="Bring over subagents from Claude Code, OpenCode or GitHub Copilot">
+              <Download size={14} /> Import
+            </button>
+            <button className="btn primary" onClick={() => setDraft(blank(project ? "project" : "global"))}>
+              <Plus size={14} /> New agent
+            </button>
+          </div>
         </div>
+        {data.agents.length > 0 && <ImportHint kind="agent" items={[...fresh.keys()]} from={freshFrom} onReview={() => setImporting(true)} />}
         {data.errors.length > 0 && (
           <div className="config-errors">
             {data.errors.map((e, i) => (
@@ -97,7 +138,16 @@ export function AgentsPage() {
             {data.agents.length === 0 && (
               <div className="card-body">
                 <Empty icon={<Bot size={22} />} title="No agents yet">
-                  <p className="small">Create a read-only “scout” or a “reviewer” to start delegating.</p>
+                  {fresh.size > 0 ? (
+                    <>
+                      <p className="small">{`Found ${fresh.size} agent${fresh.size === 1 ? "" : "s"} in ${freshFrom.join(", ")}.`}</p>
+                      <button className="btn primary" style={{ marginTop: 8 }} onClick={() => setImporting(true)}>
+                        <Download size={14} /> Import them
+                      </button>
+                    </>
+                  ) : (
+                    <p className="small">Create a read-only “scout” or a “reviewer” to start delegating, or import the subagents you made in Claude Code, OpenCode or GitHub Copilot.</p>
+                  )}
                 </Empty>
               </div>
             )}
@@ -230,6 +280,130 @@ export function AgentsPage() {
           )}
         </div>
       </div>
+      {importing && (
+        <AgentImportModal
+          project={project}
+          existing={data.agents}
+          onClose={() => setImporting(false)}
+          onDone={() => void load()}
+        />
+      )}
     </div>
+  );
+}
+
+function AgentImportModal({ project, existing, onClose, onDone }: { project?: string; existing: AgentDefinition[]; onClose: () => void; onDone: () => void }) {
+  const { home } = useApp();
+  const [sources, setSources] = useState<AgentSource[]>();
+  const [picked, setPicked] = useState<Record<string, boolean>>({});
+  const [scope, setScope] = useState<"global" | "project">(project ? "project" : "global");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    void req<AgentSource[]>("agents.importSources", { project }).then(
+      (list) => {
+        setSources(list);
+        const pre: Record<string, boolean> = {};
+        const seen = new Set(existing.map((a) => a.name.toLowerCase()));
+        for (const src of list) for (const a of src.agents) if (!seen.has(a.name)) (seen.add(a.name), (pre[`${src.id}/${a.name}`] = true));
+        setPicked(pre);
+      },
+      (e) => (useApp.getState().toast("error", (e as Error).message), setSources([])),
+    );
+  }, [project]);
+  const has = (n: string) => existing.some((a) => a.scope === scope && a.name.toLowerCase() === n);
+  const count = Object.values(picked).filter(Boolean).length;
+
+  async function run() {
+    setBusy(true);
+    let added = 0;
+    for (const src of sources ?? []) {
+      const names = src.agents.map((a) => a.name).filter((n) => picked[`${src.id}/${n}`]);
+      if (!names.length) continue;
+      const r = await act(req<{ added: string[] }>("agents.import", { source: src.id, names, scope, project, overwrite: true }));
+      added += r?.added.length ?? 0;
+    }
+    setBusy(false);
+    useApp.getState().toast("success", `Imported ${added} agent${added === 1 ? "" : "s"}`);
+    onDone();
+    onClose();
+  }
+
+  return (
+    <Modal wide onClose={onClose}>
+      <div className="modal-head">
+        <div className="modal-icon">
+          <Download size={17} />
+        </div>
+        <div className="grow">
+          <h3>Import agents</h3>
+          <p className="small faint">Subagents from other coding tools, converted to pi's format. The originals aren't changed.</p>
+        </div>
+      </div>
+      <div className="modal-body col">
+        {!sources ? (
+          <span className="spinner" />
+        ) : sources.length === 0 ? (
+          <div className="faint small">
+            Didn't find any. Looked in <span className="mono">~/.claude/agents</span>, OpenCode's <span className="mono">agent/</span> folder and <span className="mono">opencode.json</span>
+            {project ? (
+              <>
+                , and this project's <span className="mono">.claude/agents</span>, <span className="mono">.opencode/agent</span> and <span className="mono">.github/agents</span>
+              </>
+            ) : null}
+            .
+          </div>
+        ) : (
+          sources.map((src) => (
+            <div key={src.id} className="import-src">
+              <div className="row" style={{ gap: 8 }}>
+                <b className="small">{src.label}</b>
+                <span className="faint small mono ellipsis grow">{shortPath(src.path, home)}</span>
+                <button className="btn sm ghost" onClick={() => setPicked({ ...picked, ...Object.fromEntries(src.agents.map((a) => [`${src.id}/${a.name}`, true])) })}>
+                  All
+                </button>
+              </div>
+              {src.agents.map((a) => {
+                const k = `${src.id}/${a.name}`;
+                return (
+                  <div key={a.name}>
+                    <label className="import-row" title={a.file}>
+                      <input type="checkbox" checked={!!picked[k]} onChange={(e) => setPicked({ ...picked, [k]: e.target.checked })} />
+                      <span className="mono small">{a.name}</span>
+                      {has(a.name) && <span className="badge warn">replaces existing</span>}
+                      <span className="faint small ellipsis grow">{a.description}</span>
+                      <span className="faint small mono" style={{ flex: "none" }}>
+                        {a.tools ? (a.tools.length ? a.tools.filter((t) => !t.startsWith("mcp__")).join(" ") || "MCP only" : "no tools") : "all tools"}
+                      </span>
+                    </label>
+                    {picked[k] && a.notes.length > 0 && (
+                      <div className="import-notes">
+                        {a.notes.map((n) => (
+                          <span key={n}>{n}</span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ))
+        )}
+      </div>
+      <div className="modal-foot">
+        <select className="select" value={scope} onChange={(e) => setScope(e.target.value as "global" | "project")}>
+          <option value="global">Into: all projects</option>
+          <option value="project" disabled={!project}>
+            Into: this project
+          </option>
+        </select>
+        <span className="grow" />
+        <button className="btn" onClick={onClose}>
+          Cancel
+        </button>
+        <button className="btn primary" disabled={!count || busy} onClick={() => void run()}>
+          {busy && <span className="spinner" />} Import {count || ""}
+        </button>
+      </div>
+    </Modal>
   );
 }

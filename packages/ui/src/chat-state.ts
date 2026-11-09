@@ -76,8 +76,10 @@ let noticeId = 0;
 const notice = (s: ChatState, level: Notice["level"], text: string): Notice[] =>
   [...s.notices, { id: ++noticeId, level, text }].slice(-20);
 
-export function applySnapshot(s: ChatState, snap: { info: SessionInfo; state?: SessionState; messages: AgentMessage[] }): ChatState {
-  return { ...s, info: snap.info, state: snap.state, messages: snap.messages, streaming: null, loaded: true };
+export function applySnapshot(s: ChatState, snap: { info: SessionInfo; state?: SessionState; messages: AgentMessage[]; uiRequests?: ExtensionUiRequest[] }): ChatState {
+  const known = new Set(s.uiRequests.map((r) => r.id));
+  const uiRequests = [...s.uiRequests, ...(snap.uiRequests ?? []).filter((r) => !known.has(r.id))];
+  return { ...s, info: snap.info, state: snap.state, messages: snap.messages, streaming: null, loaded: true, uiRequests };
 }
 
 /** Pure reducer: channel event -> new chat state. */

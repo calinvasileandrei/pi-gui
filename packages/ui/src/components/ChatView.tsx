@@ -37,7 +37,7 @@ export function MessageList({ chat, sessionId, onOpenDiff, empty }: { chat: Chat
           <div className="chat-inner">
             {"typing" in it ? (
               <div className="msg-assistant">
-                <span className="avatar">π</span>
+                <Avatar claude={chat.info?.harness === "claude"} />
                 <div className="typing"><i /><i /><i /></div>
               </div>
             ) : (
@@ -120,12 +120,21 @@ const Message = memo(function Message(p: MsgProps) {
   }
 });
 
+const Avatar = ({ claude }: { claude: boolean }) =>
+  claude ? (
+    <span className="avatar claude" title="Claude Code">
+      ✳
+    </span>
+  ) : (
+    <span className="avatar">π</span>
+  );
+
 function Assistant({ msg, live, chat, results, runsByCall, sessionId, onOpenDiff }: MsgProps & { msg: AssistantMessage }) {
   const blocks = msg.content;
   const hasText = blocks.some((c) => c.type === "text" && c.text.trim());
   return (
     <div className="msg-assistant" style={{ margin: "10px 0" }}>
-      <span className="avatar">π</span>
+      <Avatar claude={msg.provider === "claude-code"} />
       <div className="msg-body">
         {blocks.map((c, i) => {
           if (c.type === "text") return c.text ? <Markdown key={i} text={c.text} /> : null;

@@ -149,37 +149,125 @@ export interface ImportSource {
   servers: Record<string, McpServerConfig>;
 }
 
+/** JSON with comments and trailing commas (VS Code, Zed, OpenCode .jsonc). Strings are left alone, so URLs survive. */
+export function parseJsonc(text: string): unknown {
+  let out = "";
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i]!;
+    if (c === '"') {
+      let j = i + 1;
+      while (j < text.length && text[j] !== '"') j += text[j] === "\\" ? 2 : 1;
+      out += text.slice(i, j + 1);
+      i = j;
+    } else if (c === "/" && text[i + 1] === "/") {
+      while (i < text.length && text[i] !== "\n") i++;
+      out += "\n";
+    } else if (c === "/" && text[i + 1] === "*") {
+      i = text.indexOf("*/", i + 2);
+      if (i < 0) break;
+      i++;
+    } else out += c;
+  }
+  return JSON.parse(out.replace(/,(\s*[}\]])/g, "$1"));
+}
+
+type Raw = Record<string, any>;
+/** turn one tool's entry into our format; undefined = skip it */
+type Convert = (v: Raw) => Raw | undefined;
+
+const asIs: Convert = (v) => {
+  // Gemini CLI: httpUrl = streamable HTTP, url = SSE
+  if (typeof v.httpUrl === "string" && !v.url) return { ...v, url: v.httpUrl, type: "http", httpUrl: undefined };
+  return v;
+};
+const fromOpenCode: Convert = (v) => {
+  const disabled = v.enabled === false ? true : undefined;
+  if (v.type === "remote" || (typeof v.url === "string" && !v.command)) return { url: v.url, headers: v.headers, disabled };
+  const cmd = Array.isArray(v.command) ? v.command.map(String) : typeof v.command === "string" ? [v.command] : [];
+  if (!cmd.length) return;
+  return { command: cmd[0], args: cmd.slice(1), env: v.environment, disabled };
+};
+const fromCodex: Convert = (v) => {
+  const headers: Record<string, string> = { ...(v.http_headers ?? {}) };
+  if (typeof v.bearer_token_env_var === "string") headers.Authorization = "Bearer ${" + v.bearer_token_env_var + "}";
+  for (const [k, e] of Object.entries((v.env_http_headers ?? {}) as Record<string, string>)) headers[k] = "${" + e + "}";
+  const base = { disabled: v.enabled === false ? true : undefined, disabledTools: v.disabled_tools, timeout: typeof v.tool_timeout_sec === "number" ? Math.round(v.tool_timeout_sec * 1000) : undefined };
+  if (typeof v.url === "string") return { ...base, url: v.url, headers };
+  if (typeof v.command !== "string") return;
+  return { ...base, command: v.command, args: v.args, env: v.env, cwd: v.cwd };
+};
+const fromZed: Convert = (v) => {
+  const c = v.command && typeof v.command === "object" ? v.command : v; // older: {command: {path, args, env}}
+  const command = typeof c.path === "string" ? c.path : typeof c.command === "string" ? c.command : undefined;
+  if (typeof v.url === "string") return { url: v.url, headers: v.headers };
+  if (!command) return; // extension-provided servers live inside Zed
+  return { command, args: c.args, env: c.env };
+};
+
+interface Candidate {
+  id: string;
+  label: string;
+  file: string;
+  /** the object holding servers, from the parsed file */
+  pick: (j: Raw) => Raw | undefined;
+  convert?: Convert;
+  toml?: boolean;
+}
+
 /** MCP configs other tools on this Mac already have — offered as one-click imports. */
 export async function findImportSources(project?: string): Promise<ImportSource[]> {
   const h = homedir();
-  const cands: { id: string; label: string; file: string; key?: string; pick?: (j: any) => Record<string, unknown> | undefined }[] = [
-    { id: "claude-desktop", label: "Claude Desktop", file: join(h, "Library/Application Support/Claude/claude_desktop_config.json") },
-    { id: "cursor", label: "Cursor", file: join(h, ".cursor/mcp.json") },
-    { id: "windsurf", label: "Windsurf", file: join(h, ".codeium/windsurf/mcp_config.json") },
-    { id: "claude-code", label: "Claude Code (user)", file: join(h, ".claude.json") },
-    { id: "vscode", label: "VS Code (user)", file: join(h, "Library/Application Support/Code/User/mcp.json"), key: "servers" },
+  const codexHome = process.env.CODEX_HOME || join(h, ".codex");
+  const vsGlobal = join(h, "Library/Application Support/Code/User");
+  const key = (k: string) => (j: Raw) => j?.[k];
+  const std = key("mcpServers");
+  const cands: Candidate[] = [
+    { id: "claude-code", label: "Claude Code", file: join(h, ".claude.json"), pick: std },
+    { id: "claude-desktop", label: "Claude Desktop", file: join(h, "Library/Application Support/Claude/claude_desktop_config.json"), pick: std },
+    { id: "cursor", label: "Cursor", file: join(h, ".cursor/mcp.json"), pick: std },
+    { id: "codex", label: "Codex", file: join(codexHome, "config.toml"), pick: key("mcp_servers"), convert: fromCodex, toml: true },
+    { id: "gemini", label: "Gemini CLI", file: join(h, ".gemini/settings.json"), pick: std },
+    { id: "opencode", label: "OpenCode", file: join(h, ".config/opencode/opencode.json"), pick: key("mcp"), convert: fromOpenCode },
+    { id: "opencode-c", label: "OpenCode", file: join(h, ".config/opencode/opencode.jsonc"), pick: key("mcp"), convert: fromOpenCode },
+    { id: "windsurf", label: "Windsurf", file: join(h, ".codeium/windsurf/mcp_config.json"), pick: std },
+    { id: "vscode", label: "VS Code", file: join(vsGlobal, "mcp.json"), pick: key("servers") },
+    { id: "cline", label: "Cline", file: join(vsGlobal, "globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json"), pick: std },
+    { id: "zed", label: "Zed", file: join(h, ".config/zed/settings.json"), pick: key("context_servers"), convert: fromZed },
   ];
   if (project) {
     cands.push(
-      { id: "project-mcp", label: "This project's .mcp.json", file: join(project, ".mcp.json") },
-      { id: "project-cursor", label: "This project's .cursor/mcp.json", file: join(project, ".cursor/mcp.json") },
-      { id: "project-vscode", label: "This project's .vscode/mcp.json", file: join(project, ".vscode/mcp.json"), key: "servers" },
+      // Claude Code's per-project servers (`claude mcp add` without --scope) live in ~/.claude.json
+      { id: "claude-code-local", label: "Claude Code · this project", file: join(h, ".claude.json"), pick: (j) => j?.projects?.[project]?.mcpServers },
+      { id: "project-mcp", label: "This project · .mcp.json", file: join(project, ".mcp.json"), pick: std },
+      { id: "project-cursor", label: "This project · Cursor", file: join(project, ".cursor/mcp.json"), pick: std },
+      { id: "project-vscode", label: "This project · VS Code", file: join(project, ".vscode/mcp.json"), pick: key("servers") },
+      { id: "project-gemini", label: "This project · Gemini CLI", file: join(project, ".gemini/settings.json"), pick: std },
+      { id: "project-opencode", label: "This project · OpenCode", file: join(project, "opencode.json"), pick: key("mcp"), convert: fromOpenCode },
+      { id: "project-opencode-c", label: "This project · OpenCode", file: join(project, "opencode.jsonc"), pick: key("mcp"), convert: fromOpenCode },
+      { id: "project-codex", label: "This project · Codex", file: join(project, ".codex/config.toml"), pick: key("mcp_servers"), convert: fromCodex, toml: true },
     );
   }
   const out: ImportSource[] = [];
+  const parsed = new Map<string, Raw | null>();
   for (const c of cands) {
     if (!existsSync(c.file)) continue;
     try {
-      const j = JSON.parse(await readFile(c.file, "utf8"));
-      const raw = (j?.[c.key ?? "mcpServers"] ?? {}) as Record<string, unknown>;
+      if (!parsed.has(c.file)) {
+        const text = await readFile(c.file, "utf8");
+        parsed.set(c.file, (c.toml ? (await import("smol-toml")).parse(text) : parseJsonc(text)) as Raw);
+      }
+      const raw = c.pick(parsed.get(c.file) ?? {}) as Raw | undefined;
+      if (!raw || typeof raw !== "object") continue;
       const servers: Record<string, McpServerConfig> = {};
       for (const [name, v] of Object.entries(raw)) {
-        const p = McpServerSchema.safeParse(v);
-        if (p.success && SERVER_NAME.test(name)) servers[name] = clean(p.data);
+        if (!v || typeof v !== "object") continue;
+        const conv = (c.convert ?? asIs)(v as Raw);
+        const p = conv && McpServerSchema.safeParse(JSON.parse(JSON.stringify(conv)));
+        if (p?.success && SERVER_NAME.test(name)) servers[name] = clean(p.data);
       }
       if (Object.keys(servers).length) out.push({ id: c.id, label: c.label, file: c.file, servers });
     } catch {
-      /* unreadable or not JSON: not offered */
+      parsed.set(c.file, null); // unreadable or not valid: not offered
     }
   }
   return out;

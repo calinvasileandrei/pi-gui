@@ -131,7 +131,10 @@ pi has no MCP built in, by design. The GUI server is the MCP client, and the gui
   - Add or edit a server: local command or remote URL, env and headers, working directory, timeout, and "paste from a README".
   - Enable or disable a server, and each tool.
   - Connect, restart or stop a server; see its status, errors and server log.
-  - Import from Claude Desktop, Cursor, Windsurf, VS Code, Claude Code, or the project's `.mcp.json`.
+  - Import from Claude Code (user and per-project), Claude Desktop, Cursor, Codex (`config.toml`), Gemini CLI, OpenCode, Windsurf, VS Code, Cline and Zed, plus the same files inside the project. Servers pi doesn't have yet are pre-ticked, and a banner on the page says how many were found.
+- [x] Agent import: subagents from Claude Code (`.claude/agents`), OpenCode (`agent/` folder and `opencode.json`) and GitHub Copilot (`.github/agents`, `.github/chatmodes`). Tool names are mapped to pi's; tools and models that don't carry over are listed before importing.
+- [x] Claude Code harness: a session can run on the user's own `claude` CLI (stream-json, same protocol as the Agent SDK) instead of pi, so turns use their Claude plan. Pick a Claude model in the model menu or make it the default in Settings. Tool calls, permission questions (dialogs), AskUserQuestion, plan approval, effort, permission modes, `!cmd`, compact, resume from history and plan-usage chip all work; sessions show a CC tag.
+- [ ] More harnesses (Codex, OpenCode) on the same seam; then rename the app to something not tied to pi.
   - Edit the raw JSON in Monaco.
 - [x] Sidebar badge (connected/total, or a failure count). Command palette entry. Subagents can be given `mcp__server__*` tool patterns (chips in the Agents editor).
 - [x] Tests:
@@ -139,3 +142,15 @@ pi has no MCP built in, by design. The GUI server is the MCP client, and the gui
   - Real pi end to end: the model called `mcp__echo__echo`, and toggling a tool or server applied live.
 - [ ] OAuth sign-in for remote servers. For now, use a token header.
 - [ ] MCP resources and prompts. Only tools are supported.
+
+## Worktrees (one worktree per feature)
+
+- [x] `worktrees.ts`: list worktrees with `git worktree list --porcelain`, plus for each one its uncommitted changes, ahead/behind its upstream, whether it's merged into the default branch, and how many commits are only on it. Create (new branch from a base, or an existing local or remote branch) and remove (with safety checks) through the git CLI, so worktrees made in a terminal show up too.
+- [x] New worktrees go next to the existing ones when they share a folder; otherwise into `<repo>.worktrees/<branch>`. The folder you pick is remembered per repo, along with the setup command and the list of files to copy (`~/.pi-gui/worktrees.json`).
+- [x] Copy ignored files such as `.env*` from the main checkout. Run a setup command (e.g. `pnpm install`) in a terminal tab.
+- [x] Sidebar: projects are grouped by repo, each worktree is a branch row with a dirty dot and its sessions nested under it. Worktrees with no sessions are listed too. Hover actions: new session here, remove worktree. The repo row has a "New worktree" button.
+- [x] File-tree header shows `repo ⎇ branch`; its menu switches worktrees or creates one. Command palette: New worktree, Switch to <branch>, Remove worktree.
+- [x] Remove dialog shows uncommitted changes, unpushed commits, merge state and the sessions that will close, with an option to delete the branch. Sessions and terminals running in the worktree are stopped first.
+- [x] Tests: `worktrees.test.ts` (4) on real repos. App driven end to end: created a worktree (`.env` copied, setup terminal opened), a dirty worktree's removal was refused, a clean one was removed with its branch.
+- [ ] Squash-merged branches show as "not merged" (they're compared with the local default branch).
+- [ ] Separate worktrees for parallel writing subagents (M8) are still not done.

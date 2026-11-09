@@ -233,6 +233,9 @@ importers:
       node-pty:
         specifier: 1.1.0
         version: 1.1.0
+      smol-toml:
+        specifier: 1.4.2
+        version: 1.4.2
       tsx:
         specifier: 4.23.15
         version: 4.23.15
@@ -2593,6 +2596,10 @@ packages:
   smart-buffer@4.2.0:
     resolution: {integrity: sha512-94hK0Hh8rPqQl2xXc3HsaBoOXKV20MToPkcXvwbISWLEs+64sBq5kFgn2kJDHb1Pry9yrP0dxrCI9RRci7RXKg==}
     engines: {node: '>= 6.0.0', npm: '>= 3.0.0'}
+
+  smol-toml@1.4.2:
+    resolution: {integrity: sha512-rInDH6lCNiEyn3+hH8KVGFdbjc099j47+OSgbMrfDYX1CmXLfdKd7qi6IfcWj2wFxvSVkuI46M+wPGYfEOEj6g==}
+    engines: {node: '>= 18'}
 
   socks-proxy-agent@8.0.5:
     resolution: {integrity: sha512-HehCEsotFqbPW9sJ8WVYB6UbmIMv7kUUORIF2Nncq4VQvBfNBLibW9YZR5dlYCSUhwcD628pRllm7n+E+YTzJw==}
@@ -5425,6 +5432,8 @@ snapshots:
       semver: 7.8.6
 
   smart-buffer@4.2.0: {}
+
+  smol-toml@1.4.2: {}
 
   socks-proxy-agent@8.0.5(supports-color@7.2.0):
     dependencies:

@@ -7,7 +7,7 @@ import type { ApprovalRequest, ChangedFile, ChangesInfo, FileDiff } from "@pi-gu
 
 const MAX_DIFF_BYTES = 2 * 1024 * 1024;
 
-function git(cwd: string, args: string[], maxBuffer = 64 * 1024 * 1024): Promise<{ ok: boolean; out: string; err: string }> {
+export function git(cwd: string, args: string[], maxBuffer = 64 * 1024 * 1024): Promise<{ ok: boolean; out: string; err: string }> {
   return new Promise((r) =>
     execFile("git", args, { cwd, maxBuffer, encoding: "utf8", env: { ...process.env, GIT_OPTIONAL_LOCKS: "0", LC_ALL: "C" } }, (e, out, err) =>
       r({ ok: !e, out: String(out ?? ""), err: String(err ?? "") }),
