@@ -32,20 +32,25 @@ export function MessageList({ chat, sessionId, onOpenDiff, empty }: { chat: Chat
       initialTopMostItemIndex={items.length - 1}
       increaseViewportBy={{ top: 900, bottom: 400 }}
       components={{ Header: () => <div className="chat-top-spacer" />, Footer: () => <div style={{ height: 12 }} /> }}
-      itemContent={(_, it) => (
-        <div className="chat-row">
-          <div className="chat-inner">
-            {"typing" in it ? (
-              <div className="msg-assistant">
-                <Avatar claude={chat.info?.harness === "claude"} />
-                <div className="typing"><i /><i /><i /></div>
-              </div>
-            ) : (
-              <Message msg={it.msg} live={it.live} chat={chat} results={results} runsByCall={runsByCall} sessionId={sessionId} onOpenDiff={onOpenDiff} />
-            )}
+      itemContent={(i, it) => {
+        // consecutive assistant messages read as one turn: only the first shows the avatar
+        const prev = items[i - 1];
+        const cont = !!prev && "msg" in prev && prev.msg.role === "assistant";
+        return (
+          <div className="chat-row">
+            <div className="chat-inner">
+              {"typing" in it ? (
+                <div className={`msg-assistant ${cont ? "cont" : ""}`}>
+                  <Avatar claude={chat.info?.harness === "claude"} />
+                  <div className="typing"><i /><i /><i /></div>
+                </div>
+              ) : (
+                <Message msg={it.msg} live={it.live} cont={cont} chat={chat} results={results} runsByCall={runsByCall} sessionId={sessionId} onOpenDiff={onOpenDiff} />
+              )}
+            </div>
           </div>
-        </div>
-      )}
+        );
+      }}
     />
   );
 }
@@ -69,6 +74,8 @@ export function ChatView({ chat, sessionId, onOpenDiff }: { chat: ChatState; ses
 interface MsgProps {
   msg: AgentMessage;
   live?: boolean;
+  /** continues the previous assistant message (same turn) */
+  cont?: boolean;
   chat: ChatState;
   results: ReturnType<typeof resultsById>;
   runsByCall: Map<string, SubagentRun>;
@@ -82,7 +89,7 @@ const Message = memo(function Message(p: MsgProps) {
     case "user": {
       const t = typeof msg.content === "string" ? msg.content : msg.content.map((c) => (c.type === "text" ? c.text : "[image]")).join("\n");
       return (
-        <div className="msg-user" style={{ margin: "14px 0 6px" }}>
+        <div className="msg-user">
           <div className="bubble">{t}</div>
         </div>
       );
@@ -129,11 +136,11 @@ const Avatar = ({ claude }: { claude: boolean }) =>
     <span className="avatar">π</span>
   );
 
-function Assistant({ msg, live, chat, results, runsByCall, sessionId, onOpenDiff }: MsgProps & { msg: AssistantMessage }) {
+function Assistant({ msg, live, cont, chat, results, runsByCall, sessionId, onOpenDiff }: MsgProps & { msg: AssistantMessage }) {
   const blocks = msg.content;
   const hasText = blocks.some((c) => c.type === "text" && c.text.trim());
   return (
-    <div className="msg-assistant" style={{ margin: "10px 0" }}>
+    <div className={`msg-assistant ${cont ? "cont" : ""}`}>
       <Avatar claude={msg.provider === "claude-code"} />
       <div className="msg-body">
         {blocks.map((c, i) => {

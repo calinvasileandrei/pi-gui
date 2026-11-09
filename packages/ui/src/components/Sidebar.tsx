@@ -164,7 +164,7 @@ export function Sidebar() {
           const active = !!r.live && r.live.id === activeId && page === "session";
           return (
             <div key={r.key} className={`sess ${nested ? "nested" : ""} ${active ? "active" : ""}`} onClick={() => open(r)} role="button" tabIndex={0} onKeyDown={(e) => e.key === "Enter" && open(r)}>
-              <span className={`dot ${r.live ? r.live.status : "stopped"}`} style={r.live ? undefined : { opacity: 0.35 }} />
+              <span className={`dot ${r.live ? r.live.status : "stopped"}`} />
               {(r.live?.harness ?? r.stored?.harness) === "claude" && (
                 <span className="harness-tag" title="Runs on Claude Code (your Claude plan)">
                   CC

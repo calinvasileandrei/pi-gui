@@ -19,7 +19,7 @@ function xtermTheme() {
     foreground: v("--text"),
     cursor: v("--accent"),
     cursorAccent: v("--code-bg"),
-    selectionBackground: dark ? "#8b7dff55" : "#6d5dfc33",
+    selectionBackground: dark ? "#3f5ffe66" : "#3f5ffe33",
     black: dark ? "#2a2a33" : "#3a3a44",
     brightBlack: dark ? "#6f6f7b" : "#8b8b96",
     red: dark ? "#ff6369" : "#d6373d",

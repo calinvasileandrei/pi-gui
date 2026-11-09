@@ -27,7 +27,7 @@ export function loadMonaco(): Promise<Monaco> {
         "diffEditor.insertedLineBackground": "#3dd68c14",
         "diffEditor.removedLineBackground": "#ff636914",
         "editorLineNumber.foreground": "#4a4a55",
-        "editor.selectionBackground": "#8b7dff40",
+        "editor.selectionBackground": "#3f5ffe55",
         "scrollbarSlider.background": "#ffffff14",
       },
     });
